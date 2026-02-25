@@ -9,6 +9,7 @@ EMBED_URL = "http://localhost:11434/api/embeddings"
 
 INDEX_FILE = "faiss.index"
 NOTES_FILE = "notes.pkl"
+MEMORY_FILE = "chat_memory.pkl"
 
 
 # ---------- Load Notes ----------
@@ -124,7 +125,13 @@ print("PKT Assistant Ready (type 'exit' to quit)\n")
 
 
 # ---------- Chat Loop ----------
-conversation_history = []
+# ---------- Load Persistent Memory ----------
+if os.path.exists(MEMORY_FILE):
+    with open(MEMORY_FILE, "rb") as f:
+        conversation_history = pickle.load(f)
+    print("Loaded previous conversation history.\n")
+else:
+    conversation_history = []
 
 while True:
     user_input = input("You: ")
@@ -221,3 +228,6 @@ Answer:
         "user": user_input,
         "ai": ai_answer
     })
+    # Save conversation to disk
+with open(MEMORY_FILE, "wb") as f:
+    pickle.dump(conversation_history, f)
