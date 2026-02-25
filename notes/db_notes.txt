@@ -1,0 +1,2 @@
+SQL is used to manage relational databases.
+Normalization reduces data redundancy.

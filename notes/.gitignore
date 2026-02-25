@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+
+# FAISS + Generated Files
+faiss.index
+notes.pkl
+chat_memory.pkl
+
+# OS
+.DS_Store
+Thumbs.db

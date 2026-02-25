@@ -1,0 +1,9 @@
+Load balancing distributes incoming network traffic across multiple servers to prevent overload and ensure high availability and reliability.
+Auto scaling automatically adjusts computing resources based on workload demand to maintain system performance and cost efficiency.
+Cloud computing provides on-demand computing resources over the internet.
+Virtualization allows multiple virtual machines to run on a single physical machine.
+Database normalization reduces data redundancy and improves data integrity.
+Horizontal scaling adds more machines to a system.
+Vertical scaling increases the capacity of a single machine.
+REST APIs use HTTP methods to enable communication between client and server.
+Containers package applications with their dependencies for consistent deployment.
