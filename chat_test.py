@@ -1,139 +1,72 @@
 import os
-import requests
-import numpy as np
-import pickle
-import faiss
+import sys
+sys.path.append(os.path.abspath("pkt"))
+
+from style_engine.style_prompt_builder import build_style_prompt
+
+from retrieval.note_loader import load_notes
+from retrieval.knowledge_graph_builder import build_knowledge_graph
+from retrieval.faiss_manager import load_or_build_index
+from retrieval.context_ranker import rank_context
+
+from utils.embedder import get_embedding
+
+from memory.memory_manager import load_conversation_memory
+from memory.usage_tracker import load_usage_memory
+from memory.save_memory import save_memory
+
+from llm.ollama_client import ask_llm
+
+
 
 LLM_URL = "http://localhost:11434/api/generate"
-EMBED_URL = "http://localhost:11434/api/embeddings"
 
 INDEX_FILE = "faiss.index"
 NOTES_FILE = "notes.pkl"
 MEMORY_FILE = "chat_memory.pkl"
-
-
-# ---------- Load Notes ----------
-from pypdf import PdfReader
-
-
-def load_notes(folder="notes", chunk_size=500):
-    documents = []
-
-    for filename in os.listdir(folder):
-        filepath = os.path.join(folder, filename)
-
-        if not os.path.isfile(filepath):
-            continue
-
-        ext = filename.lower().split(".")[-1]
-
-        text = ""
-
-        # ---------- TXT ----------
-        if ext == "txt":
-            with open(filepath, "r", encoding="utf-8") as f:
-                text = f.read()
-
-        # ---------- Markdown ----------
-        elif ext == "md":
-            with open(filepath, "r", encoding="utf-8") as f:
-                text = f.read()
-
-        # ---------- Python Code ----------
-        elif ext == "py":
-            with open(filepath, "r", encoding="utf-8") as f:
-                text = f.read()
-
-        # ---------- PDF ----------
-        elif ext == "pdf":
-            reader = PdfReader(filepath)
-            for page in reader.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
-
-        # ---------- Chunking ----------
-        if text:
-            text = text.replace("\n", " ").strip()
-
-            for i in range(0, len(text), chunk_size):
-                chunk = text[i:i + chunk_size]
-                documents.append(chunk)
-
-    return documents
-
-
-# ---------- Get Embedding ----------
-def get_embedding(text):
-    response = requests.post(
-        EMBED_URL,
-        json={
-            "model": "nomic-embed-text",
-            "prompt": text
-        }
-    )
-
-    data = response.json()
-
-    if "embedding" not in data or not data["embedding"]:
-        raise ValueError("Embedding API returned empty vector.")
-
-    return np.array(data["embedding"]).astype("float32")
+USAGE_FILE = "usage_memory.pkl"
 
 
 # ---------- Load Notes ----------
 notes_lines = load_notes()
 
 
-# ---------- Initialize / Load FAISS ----------
-if os.path.exists(INDEX_FILE) and os.path.exists(NOTES_FILE):
-    print("Loading FAISS index...\n")
-    index = faiss.read_index(INDEX_FILE)
+# ---------- TF-IDF ----------
+from sklearn.feature_extraction.text import TfidfVectorizer
 
-    with open(NOTES_FILE, "rb") as f:
-        stored_notes = pickle.load(f)
-
-    if stored_notes != notes_lines:
-        print("Notes changed. Rebuilding index...\n")
-        os.remove(INDEX_FILE)
-        os.remove(NOTES_FILE)
-        index = None
-else:
-    index = None
+vectorizer = TfidfVectorizer(stop_words="english")
+tfidf_matrix = vectorizer.fit_transform(notes_lines)
 
 
-# ---------- Build Index If Needed ----------
-if index is None:
-    print("Building FAISS index...\n")
+# ---------- Build Knowledge Graph ----------
+G, keyword_frequency, domain_strength, top_keywords_per_chunk = build_knowledge_graph(notes_lines)
 
-    embeddings = [get_embedding(text) for text in notes_lines]
-    embeddings_matrix = np.vstack(embeddings)
+print(len(notes_lines))
 
-    # Normalize for cosine similarity
-    faiss.normalize_L2(embeddings_matrix)
+# ---------- Assign Domain to Chunks ----------
+from retrieval.domain_assigner import assign_domains_to_chunks
 
-    dimension = embeddings_matrix.shape[1]
-    index = faiss.IndexFlatIP(dimension)
-    index.add(embeddings_matrix)
+chunk_domains = assign_domains_to_chunks(top_keywords_per_chunk, domain_strength)
 
-    faiss.write_index(index, INDEX_FILE)
 
-    with open(NOTES_FILE, "wb") as f:
-        pickle.dump(notes_lines, f)
+
+# ---------- Load / Build FAISS ----------
+index = load_or_build_index(INDEX_FILE, NOTES_FILE, notes_lines, get_embedding)
 
 print("PKT Assistant Ready (type 'exit' to quit)\n")
 
+style_prompt = build_style_prompt()
+
+# ---------- Load Memory ----------
+conversation_history = load_conversation_memory(MEMORY_FILE)
+
+# ---------- Load Usage Memory ----------
+usage_memory = load_usage_memory(USAGE_FILE, domain_strength)
+
 
 # ---------- Chat Loop ----------
-# ---------- Load Persistent Memory ----------
-if os.path.exists(MEMORY_FILE):
-    with open(MEMORY_FILE, "rb") as f:
-        conversation_history = pickle.load(f)
-    print("Loaded previous conversation history.\n")
-else:
-    conversation_history = []
-
 while True:
+
     user_input = input("You: ")
 
     if user_input.lower() == "exit":
@@ -144,82 +77,33 @@ while True:
         print("Please enter a question.\n")
         continue
 
-    # ---------- Context Augmentation ----------
-    augmented_query = user_input
-    if len(user_input.split()) <= 4 and conversation_history:
-        last_user_question = conversation_history[-1]["user"]
-        augmented_query = last_user_question + " " + user_input
 
-    query_embedding = get_embedding(augmented_query).reshape(1, -1)
-    faiss.normalize_L2(query_embedding)
-
-    # ---------- FAISS Search ----------
-    similarities, indices = index.search(query_embedding, 3)
-    similarity_score = similarities[0][0]
-
-    # ---------- Confidence ----------
-    if similarity_score >= 0.80:
-        confidence = "High"
-    elif similarity_score >= 0.65:
-        confidence = "Medium"
-    elif similarity_score >= 0.55:
-        confidence = "Low"
-    else:
-        confidence = "Very Low"
+    top_indices, similarity_score, confidence = rank_context(
+        user_input,
+        conversation_history,
+        index,
+        notes_lines,
+        vectorizer,
+        tfidf_matrix,
+        get_embedding,
+        chunk_domains,
+        domain_strength,
+        usage_memory
+    )
+    best_index = top_indices[0]
+    )
 
     print(f"\nSimilarity score: {similarity_score:.3f}")
     print(f"Confidence level: {confidence}")
 
-    # ---------- Simple Rejection ----------
-    if similarity_score < 0.55:
+    if similarity_score < 0.70:
         print("\nAI: Not found in my notes.")
         print("-" * 50)
         continue
 
-    # ---------- Retrieve Context ----------
-    top_matches = [notes_lines[i] for i in indices[0]]
-    context = "\n".join(top_matches)
+    context = "\n\n".join([notes_lines[i] for i in top_indices])
 
-    # ---------- Memory ----------
-    recent_memory = conversation_history[-4:]
-    memory_text = ""
-    for turn in recent_memory:
-        memory_text += f"User: {turn['user']}\nAI: {turn['ai']}\n"
-
-    full_prompt = f"""
-You are a Personal Knowledge Twin.
-
-You must ONLY use the NOTES below.
-If the answer is not explicitly contained in NOTES, respond:
-Not found in my notes.
-
-Conversation:
-{memory_text}
-
-NOTES:
-{context}
-
-QUESTION:
-{user_input}
-
-Answer:
-"""
-
-    response = requests.post(
-        LLM_URL,
-        json={
-            "model": "phi3",
-            "prompt": full_prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.2,
-                "num_predict": 100
-            }
-        }
-    )
-
-    result = response.json()
-    ai_answer = result.get("response", "No response from model.")
+    ai_answer = ask_llm(context, user_input, LLM_URL)
 
     print("\nAI:", ai_answer)
     print("-" * 50)
@@ -228,6 +112,5 @@ Answer:
         "user": user_input,
         "ai": ai_answer
     })
-    # Save conversation to disk
-with open(MEMORY_FILE, "wb") as f:
-    pickle.dump(conversation_history, f)
+
+    save_memory(conversation_history, usage_memory, MEMORY_FILE, USAGE_FILE)
