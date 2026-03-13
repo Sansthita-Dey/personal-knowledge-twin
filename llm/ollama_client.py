@@ -1,19 +1,26 @@
+
 import requests
+import json
 
 
 def ask_llm(context, question, LLM_URL):
 
     full_prompt = f"""
-You are a strict extraction system.
+You are an AI assistant answering questions from a knowledge base.
 
-Extract ONLY information from NOTES that answers the QUESTION.
-If not clearly present, respond exactly:
-Not found in my notes.
+Response style:
+{context.split("Style:")[-1] if "Style:" in context else "Provide a clear explanation."}
 
-NOTES:
+Follow this reasoning process:
+
+1. Understand the user's question.
+2. Identify the relevant concept from the provided context.
+3. Provide an answer in the requested style.
+
+Context:
 {context}
 
-QUESTION:
+Question:
 {question}
 
 Answer:
@@ -22,16 +29,27 @@ Answer:
     response = requests.post(
         LLM_URL,
         json={
-            "model": "phi3:latest",
+            "model": "phi3",
             "prompt": full_prompt,
-            "stream": False,
+            "stream": True,
             "options": {
                 "temperature": 0.4,
-                "num_predict": 90
+                "num_predict": 120,
+                "keep_alive": "30m"
             }
-        }
+        },
+        stream=True
     )
 
-    result = response.json()
+    full_answer = ""
 
-    return result.get("response", "No response from model.")
+    for line in response.iter_lines():
+        if line:
+            data = json.loads(line.decode("utf-8"))
+            token = data.get("response", "")
+            full_answer += token
+
+    print()
+
+    return full_answer
+
