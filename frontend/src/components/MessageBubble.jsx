@@ -2,7 +2,7 @@ import React from 'react';
 import { User, Sparkles } from 'lucide-react';
 
 const MessageBubble = ({ message }) => {
-  const isAI = message.role === 'ai';
+  const isAI = message.role === 'assistant';
 
   return (
     <div className={`flex w-full ${isAI ? 'justify-start' : 'justify-end'} mb-6 group`}>
