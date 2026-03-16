@@ -31,15 +31,16 @@ Answer:
         json={
             "model": "phi3",
             "prompt": full_prompt,
-            "stream": True,
+            "stream": False,
             "options": {
-                "temperature": 0.4,
-                "num_predict": 120,
+                "temperature": 0.3,
+                "num_predict": 80,
+                "top_p": 0.9,
+                "num_ctx": 2048,
                 "keep_alive": "30m"
             }
-        },
-        stream=True
-    )
+        }
+)
 
     full_answer = ""
 

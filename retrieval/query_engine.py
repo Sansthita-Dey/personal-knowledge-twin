@@ -49,7 +49,7 @@ def run_query_pipeline(
         summary_text = " ".join(msg["user"] for msg in last_messages)
         conversation_summary = f"Recent conversation topics: {summary_text}"
 
-    notes_context = "\n\n".join(notes_lines[i][:250] for i in top_indices)
+    notes_context = "\n\n".join(notes_lines[i][:180] for i in top_indices)
 
     if similarity_score > 0.80:
 
@@ -60,7 +60,7 @@ def run_query_pipeline(
     elif similarity_score > 0.60 and USE_EXTRA_SOURCES:
 
         extra_results = retrieve_all_sources(user_input)
-        extra_context = build_context(extra_results)
+        extra_context = build_context(extra_results)[:400]
 
         context = conversation_summary + "\n\n" + notes_context + "\n\n" + extra_context
 

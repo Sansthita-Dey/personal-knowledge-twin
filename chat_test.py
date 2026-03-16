@@ -195,7 +195,7 @@ while True:
     context = result["context"]
 
     # Limit context size for faster LLM response
-    context = context[:3000]
+    context = context[:1000]
 
     source_details = result["source_details"]
 
