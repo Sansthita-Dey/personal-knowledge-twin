@@ -11,16 +11,21 @@ from retrieval.knowledge_graph_builder import build_knowledge_graph
 from retrieval.faiss_manager import load_or_build_index
 from retrieval.domain_assigner import assign_domains_to_chunks
 from retrieval.query_engine import run_query_pipeline
+from retrieval.topic_clusterer import cluster_topics
+
 
 from utils.embedder import get_embedding
 from utils.personality import get_personality_instruction
 from utils.output_formatter import print_sources, print_reflection
+from utils.confidence_engine import compute_confidence
+
 
 from memory.memory_manager import load_conversation_memory, compress_conversation
 from memory.usage_tracker import load_usage_memory, reinforce_memory
 from memory.save_memory import save_memory
-
+from memory.self_learning import update_memory_importance
 from llm.ollama_client import ask_llm
+from memory.self_learning import update_memory_importance
 from config import LLM_URL
 
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -41,6 +46,9 @@ USE_EXTRA_SOURCES = True
 
 # ---------- Load Notes ----------
 notes_lines = load_notes()
+topic_clusters = cluster_topics(notes_lines)
+
+print("Topic clusters created:", len(topic_clusters))
 
 
 # ---------- TF-IDF ----------
@@ -193,7 +201,10 @@ while True:
 
     reflection_source = result["reflection_source"]
     reflection_reason = result["reflection_reason"]
-    reflection_confidence = result["confidence"]
+    reflection_confidence = compute_confidence(
+    result["similarity"],
+    len(context)
+)
 
 
     # ---------- Source Ranking ----------
@@ -253,7 +264,7 @@ while True:
         "ai": ai_answer
     })
 
-
+    usage_memory = update_memory_importance(user_input, usage_memory)
     # ---------- Context Compression ----------
     conversation_history = compress_conversation(
         conversation_history,
